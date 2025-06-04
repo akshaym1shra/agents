@@ -115,7 +115,7 @@ xai = ["livekit-plugins-xai>=1.4.0"]
 [project.urls]
 Documentation = "https://docs.livekit.io"
 Website = "https://livekit.io/"
-Source = "https://github.com/livekit/agents"
+Source = "https://github.com/akshaym1shra/agents"
 
 [tool.hatch.version]
 path = "livekit/agents/version.py"
