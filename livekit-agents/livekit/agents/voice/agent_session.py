@@ -46,6 +46,7 @@ class VoiceOptions:
     max_endpointing_delay: float
     max_tool_steps: int
     user_away_timeout: float | None
+    ignore_interrupt_list: list[str]
 
 
 Userdata_T = TypeVar("Userdata_T")
@@ -119,6 +120,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         video_sampler: NotGivenOr[_VideoSampler | None] = NOT_GIVEN,
         user_away_timeout: float | None = 15.0,
         loop: asyncio.AbstractEventLoop | None = None,
+        ignore_interrupt_list: list[str] = [],
     ) -> None:
         """`AgentSession` is the LiveKit Agents runtime that glues together
         media streams, speech/LLM components, and tool orchestration into a
@@ -177,6 +179,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
                 Default ``15.0`` s, set to ``None`` to disable.
             loop (asyncio.AbstractEventLoop, optional): Event loop to bind the
                 session to. Falls back to :pyfunc:`asyncio.get_event_loop()`.
+            ignore_interrupt_list (list[str]): List of words to ignore as interruptions.
         """
         super().__init__()
         self._loop = loop or asyncio.get_event_loop()
@@ -197,6 +200,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             max_endpointing_delay=max_endpointing_delay,
             max_tool_steps=max_tool_steps,
             user_away_timeout=user_away_timeout,
+            ignore_interrupt_list=ignore_interrupt_list,
         )
         self._started = False
         self._turn_detection = turn_detection or None
