@@ -140,6 +140,7 @@ class AgentSessionOptions:
     tts_text_transforms: Sequence[TextTransforms] | None
     ivr_detection: bool
     aec_warmup_duration: float | None
+    ignore_interrupt_list: list[str]
 
     @property
     def endpointing(self) -> EndpointingOptions:
@@ -243,6 +244,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         allow_interruptions: NotGivenOr[bool] = NOT_GIVEN,
         resume_false_interruption: NotGivenOr[bool] = NOT_GIVEN,
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
+        ignore_interrupt_list: list[str] = [],
     ) -> None:
         """`AgentSession` is the LiveKit Agents runtime that glues together
         media streams, speech/LLM components, and tool orchestration into a
@@ -312,6 +314,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             allow_interruptions (NotGivenOr[bool]): Deprecated, use turn_handling=TurnHandlingOptions(...) instead.
             resume_false_interruption (NotGivenOr[bool]): Deprecated, use turn_handling=TurnHandlingOptions(...) instead.
             agent_false_interruption_timeout (NotGivenOr[float | None]): Deprecated, use turn_handling=TurnHandlingOptions(...) instead.
+            ignore_interrupt_list (list[str]): List of words to ignore as interruptions.
         """
         super().__init__()
         self._loop = loop or asyncio.get_event_loop()
@@ -369,6 +372,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             if is_given(use_tts_aligned_transcript)
             else None,
             aec_warmup_duration=aec_warmup_duration,
+            ignore_interrupt_list=ignore_interrupt_list,
         )
         self._conn_options = conn_options or SessionConnectOptions()
         self._started = False
