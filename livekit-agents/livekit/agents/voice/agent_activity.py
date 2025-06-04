@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import asyncio
 import contextvars
 import heapq
@@ -59,6 +60,9 @@ if TYPE_CHECKING:
 _AgentActivityContextVar = contextvars.ContextVar["AgentActivity"]("agents_activity")
 _SpeechHandleContextVar = contextvars.ContextVar["SpeechHandle"]("agents_speech_handle")
 
+# Pre-compile regex pattern for better performance
+# Hindi ([\u0900-\u0963\u0965-\u097F]+ except '।') + English/Spanish ([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+)
+WORD_PATTERN = re.compile(r'[\u0900-\u0963\u0965-\u097F]+|[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+')
 
 # NOTE: AgentActivity isn't exposed to the public API
 class AgentActivity(RecognitionHooks):
@@ -163,6 +167,8 @@ class AgentActivity(RecognitionHooks):
 
         self._mcp_tools: list[mcp.MCPTool] = []
 
+        self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
+
     @property
     def draining(self) -> bool:
         return self._draining
@@ -219,6 +225,22 @@ class AgentActivity(RecognitionHooks):
             if is_given(self._agent.min_consecutive_speech_delay)
             else self._session.options.min_consecutive_speech_delay
         )
+
+    def remove_stopwords(self,text: str) -> list[str]:
+        """
+        Efficiently remove stopwords from text.
+        Uses pre-compiled regex and frozenset for O(1) lookups.
+
+        Args:
+            text: Input text string
+
+        Returns:
+            List of non-stopword words
+        """
+        if not text or not self._ignore_interrupt_list:
+            return []
+        words = WORD_PATTERN.findall(text)
+        return [word for word in words if word not in self._ignore_interrupt_list ]
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
@@ -851,6 +873,11 @@ class AgentActivity(RecognitionHooks):
             and not self._current_speech.interrupted
             and self._current_speech.allow_interruptions
         ):
+            
+            filtered = self.remove_stopwords(text)
+            if len(filtered) < self._session.options.min_interruption_words:
+                return
+
             log_event(
                 "speech interrupted by vad",
                 speech_id=self._current_speech.id,
@@ -957,6 +984,11 @@ class AgentActivity(RecognitionHooks):
                 )
                 return
 
+
+            filtered = self.remove_stopwords(info.new_transcript)
+            if len(filtered) < self._session.options.min_interruption_words:
+                return  
+            
             log_event(
                 "speech interrupted, new user turn detected",
                 speech_id=self._current_speech.id,
