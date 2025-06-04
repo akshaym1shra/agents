@@ -90,6 +90,7 @@ class AgentSessionOptions:
     preemptive_generation: bool
     tts_text_transforms: Sequence[TextTransforms] | None
     ivr_detection: bool
+    ignore_interrupt_list: list[str]
 
 
 Userdata_T = TypeVar("Userdata_T")
@@ -164,6 +165,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         loop: asyncio.AbstractEventLoop | None = None,
         # deprecated
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
+        ignore_interrupt_list: list[str] = [],
     ) -> None:
         """`AgentSession` is the LiveKit Agents runtime that glues together
         media streams, speech/LLM components, and tool orchestration into a
@@ -250,6 +252,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
                 stt, llm, and tts.
             loop (asyncio.AbstractEventLoop, optional): Event loop to bind the
                 session to. Falls back to :pyfunc:`asyncio.get_event_loop()`.
+            ignore_interrupt_list (list[str]): List of words to ignore as interruptions.
         """
         super().__init__()
         self._loop = loop or asyncio.get_event_loop()
@@ -289,6 +292,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             use_tts_aligned_transcript=use_tts_aligned_transcript
             if is_given(use_tts_aligned_transcript)
             else None,
+            ignore_interrupt_list=ignore_interrupt_list,
         )
         self._conn_options = conn_options or SessionConnectOptions()
         self._started = False
