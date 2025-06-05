@@ -72,6 +72,7 @@ class AgentActivity(RecognitionHooks):
         self._audio_recognition: AudioRecognition | None = None
         self._lock = asyncio.Lock()
         self._tool_choice: llm.ToolChoice | None = None
+        self._ignore_interrupt_list = None
 
         self._started = False
         self._draining = False
@@ -166,8 +167,8 @@ class AgentActivity(RecognitionHooks):
             )
 
         self._mcp_tools: list[mcp.MCPTool] = []
-
-        self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
+        if self._session._opts.ignore_interrupt_list:
+            self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
 
     @property
     def draining(self) -> bool:
@@ -237,10 +238,10 @@ class AgentActivity(RecognitionHooks):
         Returns:
             List of non-stopword words
         """
-        if not text or not self._ignore_interrupt_list:
-            return []
-        words = WORD_PATTERN.findall(text)
-        return [word for word in words if word not in self._ignore_interrupt_list ]
+        if text and self._ignore_interrupt_list:
+            words = WORD_PATTERN.findall(text)
+            return [word for word in words if word not in self._ignore_interrupt_list]
+        return None
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
@@ -872,9 +873,8 @@ class AgentActivity(RecognitionHooks):
             and not self._current_speech.interrupted
             and self._current_speech.allow_interruptions
         ):
-            
-            filtered = self.remove_stopwords(text)
-            if len(filtered) < self._session.options.min_interruption_words:
+            filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
+            if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return
 
             log_event(
@@ -985,7 +985,7 @@ class AgentActivity(RecognitionHooks):
 
 
             filtered = self.remove_stopwords(info.new_transcript)
-            if len(filtered) < self._session.options.min_interruption_words:
+            if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return  
             
             log_event(
