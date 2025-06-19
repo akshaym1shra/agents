@@ -877,8 +877,8 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
         ):
             filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
-            print(f"filtered: {filtered}")
-            print(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
+            logger.info(f"filtered: {filtered}")
+            logger.info(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return
 
@@ -988,8 +988,8 @@ class AgentActivity(RecognitionHooks):
                 )
                 return
 
-            print(f"info.new_transcript: {info.new_transcript}")
-            print(f"self._session.options.min_interruption_words: {self._session.options.min_interruption_words}")
+            logger.info(f"info.new_transcript: {info.new_transcript}")
+            logger.info(f"self._session.options.min_interruption_words: {self._session.options.min_interruption_words}")
             filtered = self.remove_stopwords(info.new_transcript)
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return  
