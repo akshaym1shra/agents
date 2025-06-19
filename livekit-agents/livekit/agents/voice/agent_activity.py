@@ -238,10 +238,11 @@ class AgentActivity(RecognitionHooks):
         Returns:
             List of non-stopword words
         """
+        trimmed_words = None
         if text and self._ignore_interrupt_list:
             words = WORD_PATTERN.findall(text)
-            return [word for word in words if word not in self._ignore_interrupt_list]
-        return None
+            trimmed_words = [word for word in words if word not in self._ignore_interrupt_list]
+        return trimmed_words
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
@@ -875,6 +876,8 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
         ):
             filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
+            print(f"filtered: {filtered}")
+            print(f"self._session.options.min_interruption_words: {self._session.options.min_interruption_words}")
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return
 
@@ -984,6 +987,8 @@ class AgentActivity(RecognitionHooks):
                 )
                 return
 
+            print(f"xx info.new_transcript: {info.new_transcript}")
+            print(f"xx self._session.options.min_interruption_words: {self._session.options.min_interruption_words}")
 
             filtered = self.remove_stopwords(info.new_transcript)
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
