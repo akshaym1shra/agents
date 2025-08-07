@@ -1,4 +1,4 @@
-from . import io, run_result
+from . import io
 from .agent import Agent, AgentTask, ModelSettings
 from .agent_session import AgentSession, VoiceActivityVideoSampler
 from .events import (
@@ -47,7 +47,6 @@ __all__ = [
     "TranscriptSynchronizer",
     "io",
     "room_io",
-    "run_result",
     "_ParticipantAudioOutput",
     "_ParticipantTranscriptionOutput",
     "_ParticipantStreamTranscriptionOutput",
