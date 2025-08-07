@@ -423,6 +423,10 @@ class _ParticipantStreamTranscriptionOutput:
             if key not in attributes:
                 attributes[key] = val
 
+        for key, val in self._additional_attributes.items():
+            if key not in attributes:
+                attributes[key] = val
+
         return await self._room.local_participant.stream_text(
             topic=TOPIC_TRANSCRIPTION,
             sender_identity=self._participant_identity,
