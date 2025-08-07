@@ -27,6 +27,7 @@ class _ParticipantAudioOutput(io.AudioOutput):
         num_channels: int,
         track_publish_options: rtc.TrackPublishOptions,
         track_name: str = "roomio_audio",
+        queue_size_ms: int = 100_000,  # TODO(long): move buffer to python
     ) -> None:
         super().__init__(
             label="RoomIO",
@@ -414,6 +415,10 @@ class _ParticipantStreamTranscriptionOutput:
         # include node name when available (read by client SDK)
         if getattr(self, "_node_name", None):
             attributes["node"] = getattr(self, "_node_name")
+
+        for key, val in self._additional_attributes.items():
+            if key not in attributes:
+                attributes[key] = val
 
         for key, val in self._additional_attributes.items():
             if key not in attributes:
