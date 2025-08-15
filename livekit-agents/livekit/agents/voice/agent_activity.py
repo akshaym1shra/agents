@@ -1185,13 +1185,6 @@ class AgentActivity(RecognitionHooks):
             # is detected. So the previous execution should complete quickly.
             await old_task
 
-        if self._scheduling_paused:
-            logger.warning(
-                "skipping reply to user input, speech scheduling is paused",
-                extra={"user_input": info.new_transcript},
-            )
-            return
-
         # When the audio recognition detects the end of a user turn:
         #  - check if realtime model server-side turn detection is enabled
         #  - check if there is no current generation happening
@@ -1227,6 +1220,13 @@ class AgentActivity(RecognitionHooks):
             if self._rt_session is not None:
                 self._rt_session.interrupt()
 
+        if self._scheduling_paused:
+            logger.warning(
+                "skipping on_user_turn_completed, speech scheduling is paused",
+                extra={"user_input": info.new_transcript},
+            )
+            return
+
         # id is generated
         user_message: llm.ChatMessage = llm.ChatMessage(
             role="user",
@@ -1256,6 +1256,13 @@ class AgentActivity(RecognitionHooks):
             user_message = None  # type: ignore
         elif self.llm is None:
             return  # skip response if no llm is set
+
+        if self._scheduling_paused:
+            logger.warning(
+                "skipping reply to user input, speech scheduling is paused",
+                extra={"user_input": info.new_transcript},
+            )
+            return
 
         speech_handle: SpeechHandle | None = None
         if preemptive := self._preemptive_generation:
