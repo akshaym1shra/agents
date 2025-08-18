@@ -1104,6 +1104,7 @@ class AgentActivity(RecognitionHooks):
 
         self._session._user_input_transcribed(
             UserInputTranscribedEvent(
+                language=ev.alternatives[0].language,
                 transcript=ev.alternatives[0].text,
                 is_final=False,
                 speaker_id=ev.alternatives[0].speaker_id,
@@ -1117,6 +1118,7 @@ class AgentActivity(RecognitionHooks):
 
         self._session._user_input_transcribed(
             UserInputTranscribedEvent(
+                language=ev.alternatives[0].language,
                 transcript=ev.alternatives[0].text,
                 is_final=True,
                 speaker_id=ev.alternatives[0].speaker_id,
