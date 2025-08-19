@@ -2094,6 +2094,24 @@ class AgentActivity(RecognitionHooks):
             text_out.first_text_fut.add_done_callback(_on_first_frame)
 
         # messages in RunResult are ordered by the `created_at` field
+        # before executing tools, make sure we generated all the text
+        # (this ensure everything is kept ordered)
+        if text_forward_task:
+            await speech_handle.wait_if_not_interrupted([text_forward_task])
+
+        generated_msg: llm.ChatMessage | None = None
+        if text_out and text_out.text:
+            # emit the assistant message to the SpeechHandle before calling the tools
+            generated_msg = llm.ChatMessage(
+                role="assistant",
+                content=[text_out.text],
+                id=llm_gen_data.id,
+                interrupted=False,
+                created_at=reply_started_at,
+                metadata=llm_gen_data.metadata,
+            )
+            speech_handle._item_added([generated_msg])
+
         def _tool_execution_started_cb(fnc_call: llm.FunctionCall) -> None:
             # function call is created during LLM generation, might be before the speech is authorized
             # reset the `created_at` to the start time of the tool execution
@@ -2168,7 +2186,29 @@ class AgentActivity(RecognitionHooks):
                 else:
                     forwarded_text = ""
 
-        elif read_transcript_from_tts and text_out and not text_out.text:
+            if forwarded_text:
+                msg = chat_ctx.add_message(
+                    role="assistant",
+                    content=forwarded_text,
+                    id=llm_gen_data.id,
+                    interrupted=True,
+                    created_at=reply_started_at,
+                    metrics=assistant_metrics,
+                    metadata=llm_gen_data.metadata,
+                )
+                self._agent._chat_ctx.insert(msg)
+                self._session._conversation_item_added(msg)
+                speech_handle._item_added([msg])
+                current_span.set_attribute(trace_types.ATTR_RESPONSE_TEXT, forwarded_text)
+
+            if self._session.agent_state == "speaking":
+                self._session._update_agent_state("listening")
+
+            speech_handle._mark_generation_done()
+            await utils.aio.cancel_and_wait(exe_task)
+            return
+
+        if read_transcript_from_tts and text_out and not text_out.text:
             logger.warning(
                 "`use_tts_aligned_transcript` is enabled but no agent transcript was returned from tts"
             )
