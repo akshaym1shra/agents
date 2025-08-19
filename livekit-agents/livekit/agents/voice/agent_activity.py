@@ -1892,6 +1892,24 @@ class AgentActivity(RecognitionHooks):
             text_out.first_text_fut.add_done_callback(_on_first_frame)
 
         # messages in RunResult are ordered by the `created_at` field
+        # before executing tools, make sure we generated all the text
+        # (this ensure everything is kept ordered)
+        if text_forward_task:
+            await speech_handle.wait_if_not_interrupted([text_forward_task])
+
+        generated_msg: llm.ChatMessage | None = None
+        if text_out and text_out.text:
+            # emit the assistant message to the SpeechHandle before calling the tools
+            generated_msg = llm.ChatMessage(
+                role="assistant",
+                content=[text_out.text],
+                id=llm_gen_data.id,
+                interrupted=False,
+                created_at=reply_started_at,
+                metadata=llm_gen_data.metadata,
+            )
+            speech_handle._item_added([generated_msg])
+
         def _tool_execution_started_cb(fnc_call: llm.FunctionCall) -> None:
             speech_handle._item_added([fnc_call])
 
@@ -1974,6 +1992,7 @@ class AgentActivity(RecognitionHooks):
                     interrupted=True,
                     created_at=reply_started_at,
                     metrics=assistant_metrics,
+                    metadata=llm_gen_data.metadata,
                 )
                 self._agent._chat_ctx.insert(msg)
                 self._session._conversation_item_added(msg)

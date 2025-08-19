@@ -56,6 +56,7 @@ class _LLMGenerationData:
     id: str = field(default_factory=lambda: utils.shortuuid("item_"))
     started_fut: asyncio.Future[None] = field(default_factory=asyncio.Future)
     ttft: float | None = None
+    metadata: dict | None = None
 
 
 def perform_llm_inference(
@@ -139,6 +140,9 @@ async def _llm_inference_task(
             elif isinstance(chunk, ChatChunk):
                 if not chunk.delta:
                     continue
+
+                if chunk.metadata:
+                    data.metadata = chunk.metadata
 
                 if chunk.delta.tool_calls:
                     for tool in chunk.delta.tool_calls:
