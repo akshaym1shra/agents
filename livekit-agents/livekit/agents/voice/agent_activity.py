@@ -1760,6 +1760,7 @@ class AgentActivity(RecognitionHooks):
                 id=llm_gen_data.id,
                 interrupted=False,
                 created_at=reply_started_at,
+                metadata=llm_gen_data.metadata,
             )
             speech_handle._item_added([generated_msg])
 
@@ -1821,6 +1822,7 @@ class AgentActivity(RecognitionHooks):
                 copy_msg = generated_msg.model_copy()
                 copy_msg.content = [forwarded_text]
                 copy_msg.interrupted = True
+                copy_msg.metadata = generated_msg.metadata
 
                 if forwarded_text:
                     self._agent._chat_ctx.insert(copy_msg)
