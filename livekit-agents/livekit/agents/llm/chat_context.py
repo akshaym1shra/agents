@@ -159,6 +159,7 @@ class ChatMessage(BaseModel):
     metrics: MetricsReport = Field(default_factory=lambda: MetricsReport())
     created_at: float = Field(default_factory=time.time)
     hash: bytes | None = Field(default=None, deprecated="hash is deprecated")
+    metadata: dict | None = None
 
     @property
     def text_content(self) -> str | None:
@@ -260,6 +261,7 @@ class ChatContext:
         created_at: NotGivenOr[float] = NOT_GIVEN,
         metrics: NotGivenOr[MetricsReport] = NOT_GIVEN,
         extra: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+        metadata: NotGivenOr[dict] = NOT_GIVEN,
     ) -> ChatMessage:
         kwargs: dict[str, Any] = {}
         if is_given(id):
@@ -272,6 +274,8 @@ class ChatContext:
             kwargs["metrics"] = metrics
         if is_given(extra):
             kwargs["extra"] = extra
+        if is_given(metadata):
+            kwargs["metadata"] = metadata
 
         if isinstance(content, str):
             message = ChatMessage(role=role, content=[content], **kwargs)
