@@ -114,6 +114,7 @@ class ChatMessage(BaseModel):
     transcript_confidence: float | None = None
     hash: bytes | None = None
     created_at: float = Field(default_factory=time.time)
+    metadata: dict | None = None
 
     @property
     def text_content(self) -> str | None:
@@ -190,6 +191,7 @@ class ChatContext:
         id: NotGivenOr[str] = NOT_GIVEN,
         interrupted: NotGivenOr[bool] = NOT_GIVEN,
         created_at: NotGivenOr[float] = NOT_GIVEN,
+        metadata: NotGivenOr[dict] = NOT_GIVEN,
     ) -> ChatMessage:
         kwargs: dict[str, Any] = {}
         if is_given(id):
@@ -198,6 +200,8 @@ class ChatContext:
             kwargs["interrupted"] = interrupted
         if is_given(created_at):
             kwargs["created_at"] = created_at
+        if is_given(metadata):
+            kwargs["metadata"] = metadata
 
         if isinstance(content, str):
             message = ChatMessage(role=role, content=[content], **kwargs)
