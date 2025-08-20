@@ -52,6 +52,7 @@ class _LLMGenerationData:
     id: str = field(default_factory=lambda: utils.shortuuid("item_"))
     started_fut: asyncio.Future[None] = field(default_factory=asyncio.Future)
     metadata: dict | None = None
+    node_name_fut: asyncio.Future[str | None] = field(default_factory=asyncio.Future)
 
 
 def perform_llm_inference(
@@ -134,6 +135,13 @@ async def _llm_inference_task(
 
                 if chunk.metadata:
                     data.metadata = chunk.metadata
+                    print(f"_llm_inference_task METADATA: {chunk.metadata}")
+                    # set node_name as soon as it appears
+                    if not data.node_name_fut.done():
+                        try:
+                            data.node_name_fut.set_result(chunk.metadata.get("node"))
+                        except Exception:
+                            pass
 
                 if chunk.delta.tool_calls:
                     for tool in chunk.delta.tool_calls:
@@ -151,6 +159,7 @@ async def _llm_inference_task(
 
                 if chunk.delta.content:
                     data.generated_text += chunk.delta.content
+                    print(f"_llm_inference_task ID: {chunk.id}")
                     text_ch.send_nowait(chunk.delta.content)
             else:
                 logger.warning(
@@ -167,6 +176,15 @@ async def _llm_inference_task(
             [fnc.model_dump(exclude={"type", "created_at"}) for fnc in data.generated_functions]
         ),
     )
+    # resolve node_name if never set
+    if not data.node_name_fut.done():
+        try:
+            data.node_name_fut.set_result(data.metadata.get("node") if data.metadata else None)
+        except Exception:
+            try:
+                data.node_name_fut.set_result(None)
+            except Exception:
+                pass
     return True
 
 
@@ -231,10 +249,20 @@ class _TextOutput:
 
 
 def perform_text_forwarding(
-    *, text_output: io.TextOutput | None, source: AsyncIterable[str]
+    *,
+    text_output: io.TextOutput | None,
+    source: AsyncIterable[str],
+    node_name_future: asyncio.Future[str | None] | None = None,
 ) -> tuple[asyncio.Task[None], _TextOutput]:
     out = _TextOutput(text="", first_text_fut=asyncio.Future())
-    task = asyncio.create_task(_text_forwarding_task(text_output, source, out))
+    task = asyncio.create_task(
+        _text_forwarding_task(
+            text_output,
+            source,
+            out,
+            node_name_future=node_name_future,
+        )
+    )
     return task, out
 
 
@@ -243,15 +271,44 @@ async def _text_forwarding_task(
     text_output: io.TextOutput | None,
     source: AsyncIterable[str],
     out: _TextOutput,
+    node_name_future: asyncio.Future[str | None] | None = None,
 ) -> None:
     try:
+        first_delta = True
         async for delta in source:
             out.text += delta
             if text_output is not None:
-                await text_output.capture_text(delta)
+                node_name: str | None = None
+                if node_name_future is not None:
+                    # Best effort: for the first delta, give metadata a brief chance to arrive
+                    if first_delta and not node_name_future.done():
+                        try:
+                            await asyncio.wait_for(node_name_future, timeout=0.1)
+                        except Exception:
+                            pass
+
+                    if node_name_future.done():
+                        try:
+                            node_name = node_name_future.result()
+                        except Exception:
+                            node_name = None
+                print("text_output node_name: ", node_name)
+                # Set current node on synchronizer if used
+                try:
+                    from .transcription.synchronizer import TranscriptSynchronizer
+                    if isinstance(getattr(text_output, "_synchronizer", None), TranscriptSynchronizer):
+                        await text_output._synchronizer._set_current_node_name(node_name)
+                except Exception:
+                    pass
+
+                try:
+                    await text_output.capture_text(delta, node_name=node_name)
+                except TypeError:
+                    await text_output.capture_text(delta)
 
             if not out.first_text_fut.done():
                 out.first_text_fut.set_result(None)
+            first_delta = False
     finally:
         if isinstance(source, _ACloseable):
             await source.aclose()

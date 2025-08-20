@@ -247,7 +247,7 @@ class _ParticipantLegacyTranscriptionOutput:
         self._pushed_text = ""
 
     @utils.log_exceptions(logger=logger)
-    async def capture_text(self, text: str) -> None:
+    async def capture_text(self, text: str, node_name: str | None = None) -> None:
         if self._participant_identity is None or self._track_id is None:
             return
 
@@ -257,6 +257,10 @@ class _ParticipantLegacyTranscriptionOutput:
         if not self._capturing:
             self._reset_state()
             self._capturing = True
+
+        # persist latest node name for this segment (no native attrs on legacy API)
+        if node_name is not None:
+            self._node_name = node_name
 
         if self._is_delta_stream:
             self._pushed_text += text
@@ -279,6 +283,8 @@ class _ParticipantLegacyTranscriptionOutput:
         if self._participant_identity is None or self._track_id is None:
             return
 
+        node_name = getattr(self, "_node_name", None)
+        print("LANGUAGE AS node_name: ", node_name)
         transcription = rtc.Transcription(
             participant_identity=self._represented_by or self._participant_identity,
             track_sid=self._track_id,
@@ -289,7 +295,7 @@ class _ParticipantLegacyTranscriptionOutput:
                     start_time=0,
                     end_time=0,
                     final=final,
-                    language="",
+                    language=node_name or "",
                 )
             ],
         )
@@ -395,6 +401,9 @@ class _ParticipantStreamTranscriptionOutput:
             if self._track_id:
                 attributes[ATTRIBUTE_TRANSCRIPTION_TRACK_ID] = self._track_id
         attributes[ATTRIBUTE_TRANSCRIPTION_SEGMENT_ID] = self._current_id
+        # include node name when available (read by client SDK)
+        if getattr(self, "_node_name", None):
+            attributes["node"] = getattr(self, "_node_name")
 
         for key, val in self._additional_attributes.items():
             if key not in attributes:
@@ -407,7 +416,7 @@ class _ParticipantStreamTranscriptionOutput:
         )
 
     @utils.log_exceptions(logger=logger)
-    async def capture_text(self, text: str) -> None:
+    async def capture_text(self, text: str, node_name: str | None = None) -> None:
         if self._participant_identity is None:
             return
 
@@ -419,6 +428,9 @@ class _ParticipantStreamTranscriptionOutput:
             self._capturing = True
 
         self._latest_text = text
+        # persist latest node name for this segment
+        if node_name is not None:
+            self._node_name = node_name
 
         try:
             if self._room.isconnected():
@@ -438,6 +450,9 @@ class _ParticipantStreamTranscriptionOutput:
         attributes = {ATTRIBUTE_TRANSCRIPTION_FINAL: "true"}
         if self._track_id:
             attributes[ATTRIBUTE_TRANSCRIPTION_TRACK_ID] = self._track_id
+        # include node name in final attributes if available
+        if getattr(self, "_node_name", None):
+            attributes["node"] = getattr(self, "_node_name")
 
         try:
             if self._room.isconnected():
@@ -514,10 +529,11 @@ class _ParticipantTranscriptionOutput(io.TextOutput):
         for source in self.__outputs:
             source.set_participant(participant)
 
-    async def capture_text(self, text: str) -> None:
-        await asyncio.gather(*[sink.capture_text(text) for sink in self.__outputs])
+    async def capture_text(self, text: str, node_name: str | None = None) -> None:
+        await asyncio.gather(*[sink.capture_text(text, node_name=node_name) for sink in self.__outputs])
 
         if self.next_in_chain:
+            # next sinks may not accept node_name; call without it
             await self.next_in_chain.capture_text(text)
 
     def flush(self) -> None:
