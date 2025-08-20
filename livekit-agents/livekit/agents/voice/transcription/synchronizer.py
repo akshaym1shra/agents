@@ -130,12 +130,19 @@ class _TextData:
 class _SegmentSynchronizerImpl:
     """Synchronizes one text segment with one audio segment"""
 
-    def __init__(self, options: _TextSyncOptions, *, next_in_chain: io.TextOutput) -> None:
+    def __init__(
+        self,
+        options: _TextSyncOptions,
+        *,
+        next_in_chain: io.TextOutput,
+        node_name_provider: Callable[[], str | None] | None = None,
+    ) -> None:
         self._opts = options
         self._text_data = _TextData(word_stream=self._opts.word_tokenizer.stream())
         self._audio_data = _AudioData(sr_stream=self._opts.speaking_rate_detector.stream())
 
         self._next_in_chain = next_in_chain
+        self._node_name_provider = node_name_provider
         self._start_wall_time: float | None = None
         self._start_fut: asyncio.Event = asyncio.Event()
 
@@ -288,7 +295,18 @@ class _SegmentSynchronizerImpl:
     async def _capture_task(self) -> None:
         try:
             async for text in self._out_ch:
-                await self._next_in_chain.capture_text(text)
+                self._text_data.forwarded_text += text
+                node_name: str | None = None
+                if self._node_name_provider is not None:
+                    try:
+                        node_name = self._node_name_provider()
+                    except Exception:
+                        node_name = None
+
+                try:
+                    await self._next_in_chain.capture_text(text, node_name=node_name)
+                except TypeError:
+                    await self._next_in_chain.capture_text(text)
         finally:
             self._next_in_chain.flush()
 
@@ -421,7 +439,13 @@ class TranscriptSynchronizer:
         self._closed = False
 
         # initial segment/first segment, recreated for each new segment
-        self._impl = _SegmentSynchronizerImpl(options=self._opts, next_in_chain=next_in_chain_text)
+        self._current_node_name: str | None = None
+        self._node_name_provider = lambda: self._current_node_name
+        self._impl = _SegmentSynchronizerImpl(
+            options=self._opts,
+            next_in_chain=next_in_chain_text,
+            node_name_provider=self._node_name_provider,
+        )
         self._rotate_segment_atask = asyncio.create_task(self._rotate_segment_task(None))
 
     @property
@@ -471,7 +495,9 @@ class TranscriptSynchronizer:
 
         await self._impl.aclose()
         self._impl = _SegmentSynchronizerImpl(
-            options=self._opts, next_in_chain=self._text_output._next_in_chain
+            options=self._opts,
+            next_in_chain=self._text_output._next_in_chain,
+            node_name_provider=self._node_name_provider,
         )
 
     def rotate_segment(self) -> None:
@@ -493,6 +519,10 @@ class TranscriptSynchronizer:
         # just in case, we do log a warning if it does)
         while not self._rotate_segment_atask.done():
             await self._rotate_segment_atask
+
+    # Update node name during capture; accessed by node_name_provider when forwarding
+    async def _set_current_node_name(self, node_name: str | None) -> None:
+        self._current_node_name = node_name
 
 
 class _SyncedAudioOutput(io.AudioOutput):
