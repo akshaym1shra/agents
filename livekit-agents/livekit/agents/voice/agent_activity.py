@@ -262,7 +262,7 @@ class AgentActivity(RecognitionHooks):
 
     @property
     def use_tts_aligned_transcript(self) -> bool:
-        return (
+        use_aligned_transcript = (
             self._agent.use_tts_aligned_transcript
             if is_given(self._agent.use_tts_aligned_transcript)
             else self._session.options.use_tts_aligned_transcript
@@ -284,6 +284,12 @@ class AgentActivity(RecognitionHooks):
             trimmed_words = [word for word in words if word not in self._ignore_interrupt_list]
             return trimmed_words
         return trimmed_words
+
+        if is_given(use_aligned_transcript):
+            return use_aligned_transcript
+
+        # enable for non-streaming stt automatically if not specified
+        return self.tts is not None and not self.tts.capabilities.streaming
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
