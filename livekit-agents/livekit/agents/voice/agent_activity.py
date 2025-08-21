@@ -344,6 +344,12 @@ class AgentActivity(RecognitionHooks):
         return trimmed_words
 
 
+        if is_given(use_aligned_transcript):
+            return use_aligned_transcript
+
+        # enable for non-streaming stt automatically if not specified
+        return self.tts is not None and not self.tts.capabilities.streaming
+
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
 
