@@ -294,6 +294,9 @@ class AgentActivity(RecognitionHooks):
             if is_given(self._agent.use_tts_aligned_transcript)
             else self._session.options.use_tts_aligned_transcript
         )
+
+        return use_aligned_transcript is True
+
     def remove_stopwords(self,text: str) -> list[str]:
         """
         Efficiently remove stopwords from text.
@@ -311,8 +314,6 @@ class AgentActivity(RecognitionHooks):
             trimmed_words = [word for word in words if word not in self._ignore_interrupt_list]
             return trimmed_words
         return trimmed_words
-
-        return use_aligned_transcript is True
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
