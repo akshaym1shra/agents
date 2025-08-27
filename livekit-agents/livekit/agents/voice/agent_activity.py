@@ -1364,10 +1364,6 @@ class AgentActivity(RecognitionHooks):
             if self._current_speech:
                 await self._current_speech.interrupt()
 
-            self._current_speech.interrupt()
-            if self._current_speech.interrupted:
-                self._current_speech._mark_interrupted_by_user()
-
             if self._rt_session is not None:
                 self._rt_session.interrupt()
 
