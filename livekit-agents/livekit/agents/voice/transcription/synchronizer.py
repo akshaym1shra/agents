@@ -407,6 +407,7 @@ class _SegmentSynchronizerImpl:
         await self._audio_data.sr_stream.aclose()
         await self._capture_atask
         await self._speaking_rate_atask
+        self._output_enabled_ev.set()
 
 
 class TranscriptSynchronizer:
