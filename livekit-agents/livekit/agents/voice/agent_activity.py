@@ -1142,6 +1142,7 @@ class AgentActivity(RecognitionHooks):
 
             if self._rt_session is not None:
                 self._rt_session.interrupt()
+            self._paused_speech = self._current_speech
 
             # reset the false interruption timer
             if self._false_interruption_timer:
@@ -1350,9 +1351,8 @@ class AgentActivity(RecognitionHooks):
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return  
 
-            self._current_speech.interrupt()
-            if self._current_speech.interrupted:
-                self._current_speech._mark_interrupted_by_user()
+            if self._current_speech:
+                self._current_speech.interrupt()
 
             if self._rt_session is not None:
                 self._rt_session.interrupt()
