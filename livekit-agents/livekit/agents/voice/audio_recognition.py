@@ -425,6 +425,7 @@ class AudioRecognition:
             if not transcript:
                 return
 
+            self._hooks.on_final_transcript(ev)
             logger.debug(
                 "received user preflight transcript",
                 extra={"user_transcript": transcript, "language": self._last_language},
