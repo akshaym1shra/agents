@@ -165,6 +165,8 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         # deprecated
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
         ignore_interrupt_list: list[str] = [],
+        # deprecated
+        agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
     ) -> None:
         """`AgentSession` is the LiveKit Agents runtime that glues together
         media streams, speech/LLM components, and tool orchestration into a
