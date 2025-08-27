@@ -26,7 +26,6 @@ class _ParticipantAudioOutput(io.AudioOutput):
         num_channels: int,
         track_publish_options: rtc.TrackPublishOptions,
         track_name: str = "roomio_audio",
-        queue_size_ms: int = 100_000,  # TODO(long): move buffer to python
     ) -> None:
         super().__init__(
             label="RoomIO",
