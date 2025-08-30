@@ -205,6 +205,9 @@ class AgentActivity(RecognitionHooks):
         self._on_enter_task: asyncio.Task | None = None
         self._on_exit_task: asyncio.Task | None = None
 
+        # speeches that audio playout finished but not done because of tool calls
+        self._background_speeches: set[SpeechHandle] = set()
+
         self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
         if self._session._opts.ignore_interrupt_list:
             self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
@@ -697,6 +700,7 @@ class AgentActivity(RecognitionHooks):
             self._cancel_preemptive_generation()
 
             await self._close_session()
+            await asyncio.gather(*self._interrupt_background_speeches(force=False))
 
             if self._scheduling_atask is not None:
                 await utils.aio.cancel_and_wait(self._scheduling_atask)
@@ -869,6 +873,14 @@ class AgentActivity(RecognitionHooks):
             self._preemptive_generation.speech_handle._cancel()
             self._preemptive_generation = None
 
+    def _interrupt_background_speeches(self, force: bool = False) -> list[SpeechHandle]:
+        interrupted_speeches: list[SpeechHandle] = []
+        for speech in self._background_speeches:
+            if force or speech.allow_interruptions:
+                interrupted_speeches.append(speech.interrupt(force=force))
+
+        return interrupted_speeches
+
     def interrupt(self, *, force: bool = False) -> asyncio.Future[None]:
         """Interrupt the current speech generation and any queued speeches.
 
@@ -879,30 +891,30 @@ class AgentActivity(RecognitionHooks):
         self._cancel_preemptive_generation()
 
         future = asyncio.Future[None]()
-        current_speech = self._current_speech
 
-        if current_speech is not None:
-            current_speech = current_speech.interrupt(force=force)
+        interrupted_speeches = self._interrupt_background_speeches(force=force)
+
+        if self._current_speech is not None:
+            self._current_speech.interrupt(force=force)
+            interrupted_speeches.append(self._current_speech)
 
         for _, _, speech in self._speech_q:
             speech.interrupt(force=force)
+            interrupted_speeches.append(speech)
 
         if self._rt_session is not None:
             self._rt_session.interrupt()
 
-        if current_speech is None:
+        if not interrupted_speeches:
             future.set_result(None)
         else:
 
-            def on_playout_done(sh: SpeechHandle) -> None:
-                if future.done():
-                    return
+            def on_playout_done(_: SpeechHandle) -> None:
+                if not future.done() and all(speech.done() for speech in interrupted_speeches):
+                    future.set_result(None)
 
-                future.set_result(None)
-
-            current_speech.add_done_callback(on_playout_done)
-            if current_speech.done():
-                future.set_result(None)
+            for speech in interrupted_speeches:
+                speech.add_done_callback(on_playout_done)
 
         return future
 
@@ -1288,6 +1300,9 @@ class AgentActivity(RecognitionHooks):
         #  turn)
         #  - generate a reply to the user input
 
+        # interrupt all background speeches and wait for them to finish to update the chat context
+        await asyncio.gather(*self._interrupt_background_speeches(force=False))
+
         if isinstance(self.llm, llm.RealtimeModel):
             if self.llm.capabilities.turn_detection:
                 return
@@ -1311,7 +1326,7 @@ class AgentActivity(RecognitionHooks):
                 return  
 
             if self._current_speech:
-                self._current_speech.interrupt()
+                await self._current_speech.interrupt()
 
             if self._rt_session is not None:
                 self._rt_session.interrupt()
@@ -1785,10 +1800,14 @@ class AgentActivity(RecognitionHooks):
         elif self._session.agent_state == "speaking":
             self._session._update_agent_state("listening")
 
-        speech_handle._mark_generation_done()  # mark the playout done before waiting for the tool execution  # noqa: E501
         await text_tee.aclose()
 
-        await exe_task
+        speech_handle._mark_generation_done()  # mark the playout done before waiting for the tool execution  # noqa: E501
+        self._background_speeches.add(speech_handle)
+        try:
+            await exe_task
+        finally:
+            self._background_speeches.discard(speech_handle)
 
         # important: no agent output should be used after this point
 
@@ -2165,14 +2184,19 @@ class AgentActivity(RecognitionHooks):
             self._session._conversation_item_added(msg)
             current_span.set_attribute(trace_types.ATTR_RESPONSE_TEXT, msg.text_content or "")
 
-        speech_handle._mark_generation_done()  # mark the playout done before waiting for the tool execution  # noqa: E501
         for tee in tees:
             await tee.aclose()
 
+        speech_handle._mark_generation_done()  # mark the playout done before waiting for the tool execution  # noqa: E501
         tool_output.first_tool_started_fut.add_done_callback(
             lambda _: self._session._update_agent_state("thinking")
         )
-        await exe_task
+
+        self._background_speeches.add(speech_handle)
+        try:
+            await exe_task
+        finally:
+            self._background_speeches.discard(speech_handle)
 
         # important: no agent ouput should be used after this point
 
