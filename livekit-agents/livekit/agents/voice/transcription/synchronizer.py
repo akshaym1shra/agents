@@ -295,7 +295,6 @@ class _SegmentSynchronizerImpl:
     async def _capture_task(self) -> None:
         try:
             async for text in self._out_ch:
-                await self._next_in_chain.capture_text(text)
                 self._text_data.forwarded_text += text
                 node_name: str | None = None
                 if self._node_name_provider is not None:

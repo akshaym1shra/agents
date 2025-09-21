@@ -1649,7 +1649,6 @@ class AgentActivity(RecognitionHooks):
 
         text_tee = utils.aio.itertools.tee(llm_gen_data.text_ch, 2)
         tts_text_input, tr_input = text_tee
-        print("tts_text_input : ", tts_text_input)
 
 
         tts_task: asyncio.Task[bool] | None = None
@@ -1705,7 +1704,6 @@ class AgentActivity(RecognitionHooks):
         text_out: _TextOutput | None = None
         text_forward_task: asyncio.Task | None = None
         if tr_node_result is not None:
-            print("llm_gen_data inside: ", llm_gen_data) # here netadat is None
             text_forward_task, text_out = perform_text_forwarding(
                 text_output=text_output,
                 source=tr_node_result,
@@ -1743,9 +1741,8 @@ class AgentActivity(RecognitionHooks):
                 id=llm_gen_data.id,
                 interrupted=False,
                 created_at=reply_started_at,
-                metadata=llm_gen_data.metadata, #here it is populated
+                metadata=llm_gen_data.metadata,
             )
-            print("generated_msg AKSHAY: ", generated_msg)
 
             speech_handle._item_added([generated_msg])
 
