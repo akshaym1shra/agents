@@ -154,7 +154,7 @@ class TTS(tts.TTS):
             tokenizer
             if is_given(tokenizer)
             else tokenize.blingfire.SentenceTokenizer(
-                min_sentence_len=12, stream_context_len=6, retain_format=True
+                min_sentence_len=20, stream_context_len=10, retain_format=True
             )
         )
         self._stream_pacer: tts.SentenceStreamPacer | None = None
