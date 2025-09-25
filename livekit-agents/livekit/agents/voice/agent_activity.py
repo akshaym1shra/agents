@@ -1132,16 +1132,12 @@ class AgentActivity(RecognitionHooks):
             and not self._current_speech.interrupted
             and self._current_speech.allow_interruptions
         ):
-            self._paused_speech = self._current_speech
-
             filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
             logger.info(f"filtered: {filtered}")
             logger.info(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return
 
-            if self._rt_session is not None:
-                self._rt_session.interrupt()
             self._paused_speech = self._current_speech
 
             # reset the false interruption timer
@@ -1341,9 +1337,6 @@ class AgentActivity(RecognitionHooks):
                 )
                 return
             await self._interrupt_paused_speech(self._interrupt_paused_speech_task)
-
-            if self._current_speech:
-                await self._current_speech.interrupt()
 
             logger.info(f"info.new_transcript: {info.new_transcript}")
             logger.info(f"self._session.options.min_interruption_words: {self._session.options.min_interruption_words}")
