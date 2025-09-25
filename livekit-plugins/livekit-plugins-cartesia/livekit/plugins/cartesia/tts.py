@@ -151,7 +151,11 @@ class TTS(tts.TTS):
         )
         self._streams = weakref.WeakSet[SynthesizeStream]()
         self._sentence_tokenizer = (
-            tokenizer if is_given(tokenizer) else tokenize.blingfire.SentenceTokenizer()
+            tokenizer
+            if is_given(tokenizer)
+            else tokenize.blingfire.SentenceTokenizer(
+                min_sentence_len=12, stream_context_len=6, retain_format=True
+            )
         )
         self._stream_pacer: tts.SentenceStreamPacer | None = None
         if text_pacing is True:
@@ -234,7 +238,9 @@ class TTS(tts.TTS):
     def stream(
         self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
     ) -> SynthesizeStream:
-        return SynthesizeStream(tts=self, conn_options=conn_options)
+        stream = SynthesizeStream(tts=self, conn_options=conn_options)
+        self._streams.add(stream)
+        return stream
 
     async def aclose(self) -> None:
         for stream in list(self._streams):
@@ -304,6 +310,9 @@ class SynthesizeStream(tts.SynthesizeStream):
             mime_type="audio/pcm",
             stream=True,
         )
+        # Create a context/segment id up-front and start the segment immediately
+        context_id = utils.shortuuid()
+        output_emitter.start_segment(segment_id=context_id)
 
         sent_tokenizer_stream = self._tts._sentence_tokenizer.stream()
         if self._tts._stream_pacer:
@@ -313,7 +322,6 @@ class SynthesizeStream(tts.SynthesizeStream):
             )
 
         async def _sentence_stream_task(ws: aiohttp.ClientWebSocketResponse) -> None:
-            context_id = utils.shortuuid()
             base_pkt = _to_cartesia_options(self._opts, streaming=True)
             async for ev in sent_tokenizer_stream:
                 token_pkt = base_pkt.copy()
@@ -329,18 +337,28 @@ class SynthesizeStream(tts.SynthesizeStream):
             end_pkt["continue"] = False
             await ws.send_str(json.dumps(end_pkt))
 
+        accum_len: int = 0
+        punctuation_triggers = {".", "?", "!", ",", ";", ":", "\n", "।"}
+
         async def _input_task() -> None:
+            nonlocal accum_len
             async for data in self._input_ch:
                 if isinstance(data, self._FlushSentinel):
                     sent_tokenizer_stream.flush()
+                    accum_len = 0
                     continue
 
                 sent_tokenizer_stream.push_text(data)
+                accum_len += len(data)
+                if any(ch in data for ch in punctuation_triggers) or accum_len >= 32:
+                    sent_tokenizer_stream.flush()
+                    accum_len = 0
 
             sent_tokenizer_stream.end_input()
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse) -> None:
-            current_segment_id: str | None = None
+            # Segment already started above; initialize with the pre-created context id
+            current_segment_id: str | None = context_id
             while True:
                 msg = await ws.receive()
                 if msg.type in (
@@ -360,7 +378,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                 segment_id = data.get("context_id")
                 if current_segment_id is None:
                     current_segment_id = segment_id
-                    output_emitter.start_segment(segment_id=segment_id)
+                    # segment already started earlier; no-op here
                 if data.get("data"):
                     b64data = base64.b64decode(data["data"])
                     output_emitter.push(b64data)
