@@ -137,6 +137,7 @@ class AgentSessionOptions:
     ivr_detection: bool
     aec_warmup_duration: float | None
     ignore_interrupt_list: list[str]
+    tts_text_transforms: Sequence[TextTransforms] | None
 
 
 Userdata_T = TypeVar("Userdata_T")
