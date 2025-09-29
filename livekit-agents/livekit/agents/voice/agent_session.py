@@ -171,8 +171,6 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         preemptive_generation: bool = False,
         conn_options: NotGivenOr[SessionConnectOptions] = NOT_GIVEN,
         loop: asyncio.AbstractEventLoop | None = None,
-        # deprecated
-        agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
         ignore_interrupt_list: list[str] = [],
         # deprecated
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
