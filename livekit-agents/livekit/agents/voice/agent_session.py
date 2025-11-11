@@ -86,6 +86,7 @@ class VoiceOptions:
     preemptive_generation: bool
     ignore_interrupt_list: list[str]
     tts_text_transforms: Sequence[TextTransforms] | None
+    use_zero_latency_streaming: bool
 
 
 Userdata_T = TypeVar("Userdata_T")
@@ -175,6 +176,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         ignore_interrupt_list: list[str] = [],
         # deprecated
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
+        use_zero_latency_streaming: bool = True,
     ) -> None:
         """`AgentSession` is the LiveKit Agents runtime that glues together
         media streams, speech/LLM components, and tool orchestration into a
@@ -258,6 +260,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             loop (asyncio.AbstractEventLoop, optional): Event loop to bind the
                 session to. Falls back to :pyfunc:`asyncio.get_event_loop()`.
             ignore_interrupt_list (list[str]): List of words to ignore as interruptions.
+            use_zero_latency_streaming (bool): Whether to use zero-latency streaming.
         """
         super().__init__()
         self._loop = loop or asyncio.get_event_loop()
@@ -295,6 +298,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             preemptive_generation=preemptive_generation,
             use_tts_aligned_transcript=use_tts_aligned_transcript,
             ignore_interrupt_list=ignore_interrupt_list,
+            use_zero_latency_streaming=use_zero_latency_streaming,
         )
         self._conn_options = conn_options or SessionConnectOptions()
         self._started = False
