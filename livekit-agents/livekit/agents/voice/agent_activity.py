@@ -1168,8 +1168,8 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
         ):
             filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
-            logger.info(f"filtered: {filtered}")
-            logger.info(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
+            logger.debug(f"filtered: {filtered}")
+            logger.debug(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
             if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
                 return
 
@@ -1686,14 +1686,12 @@ class AgentActivity(RecognitionHooks):
             tool_ctx=tool_ctx,
             model_settings=model_settings,
         )
-        # print("llm_gen_data : ", new_message)
         tasks.append(llm_task)
 
 
         text_tee = utils.aio.itertools.tee(llm_gen_data.text_ch, 2)
         tts_text_input, tr_input = text_tee
-        print("tts_text_input : ", tts_text_input)
-
+        logger.debug("tts_text_input (_pipeline_reply_task): ", tts_text_input)
 
         tts_task: asyncio.Task[bool] | None = None
         tts_gen_data: _TTSGenerationData | None = None
@@ -1749,7 +1747,7 @@ class AgentActivity(RecognitionHooks):
         text_out: _TextOutput | None = None
         text_forward_task: asyncio.Task | None = None
         if tr_node_result is not None:
-            print("llm_gen_data inside: ", llm_gen_data) # here netadat is None
+            logger.debug("llm_gen_data inside: ", llm_gen_data) # here netadat is None
             text_forward_task, text_out = perform_text_forwarding(
                 text_output=text_output,
                 source=tr_node_result,
@@ -1789,7 +1787,7 @@ class AgentActivity(RecognitionHooks):
                 created_at=reply_started_at,
                 metadata=llm_gen_data.metadata, #here it is populated
             )
-            print("generated_msg AKSHAY: ", generated_msg)
+            logger.debug("generated_msg : ", generated_msg)
 
             speech_handle._item_added([generated_msg])
 
