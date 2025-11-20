@@ -286,7 +286,7 @@ class _ParticipantLegacyTranscriptionOutput:
             return
 
         node_name = getattr(self, "_node_name", None)
-        print("LANGUAGE AS node_name: ", node_name)
+        logger.debug("LANGUAGE AS node_name: ", node_name)
         transcription = rtc.Transcription(
             participant_identity=self._represented_by or self._participant_identity,
             track_sid=self._track_id,
