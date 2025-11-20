@@ -114,7 +114,14 @@ class AgentActivity(RecognitionHooks):
         self._audio_recognition: AudioRecognition | None = None
         self._lock = asyncio.Lock()
         self._tool_choice: llm.ToolChoice | None = None
+        # Feature: Ignore Interrupt List
+        # Filters out stopwords from transcripts when checking interruptions
         self._ignore_interrupt_list = None
+
+        # Feature: Zero-Latency Streaming
+        # Enables immediate forwarding of LLM text chunks to TTS without buffering delays
+        # Similar to ignore_interrupt_list, this is a performance optimization feature
+        self._use_zero_latency_streaming = False
 
         self._started = False
         self._closed = False
@@ -342,15 +349,6 @@ class AgentActivity(RecognitionHooks):
             trimmed_words = [word for word in words if word not in self._ignore_interrupt_list]
             return trimmed_words
         return trimmed_words
-
-
-        if is_given(use_aligned_transcript):
-            return use_aligned_transcript
-
-        # enable for non-streaming stt automatically if not specified
-        return self.tts is not None and not self.tts.capabilities.streaming
-
-        return use_aligned_transcript is True
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
@@ -1284,6 +1282,12 @@ class AgentActivity(RecognitionHooks):
             if len(split_words(text, split_character=True)) < opt.min_interruption_words:
                 return
 
+            filtered = self.remove_stopwords(text)
+            logger.info(f"filtered: {filtered}")
+            logger.info(f"text: {text}")
+            if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
+                return
+
         if self._rt_session is not None:
             self._rt_session.start_user_activity()
 
@@ -1293,11 +1297,6 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
         ):
             self._paused_speech = self._current_speech
-            filtered = self.remove_stopwords(self._audio_recognition.current_transcript)
-            logger.info(f"filtered: {filtered}")
-            logger.info(f"self._session.options.current_transcript: {self._audio_recognition.current_transcript}")
-            if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
-                return
 
             if self._rt_session is not None:
                 self._rt_session.interrupt()
@@ -1991,14 +1990,22 @@ class AgentActivity(RecognitionHooks):
             tool_ctx=tool_ctx,
             model_settings=model_settings,
         )
-        # print("llm_gen_data : ", new_message)
         tasks.append(llm_task)
 
+        # Use zero-latency broadcast when enabled to forward LLM chunks to both
+        # TTS and transcription without buffering delays
+        tr_ch: utils.aio.Chan[str] | None = None
+        text_tee: utils.aio.itertools.Tee[str] | None = None
 
-        text_tee = utils.aio.itertools.tee(llm_gen_data.text_ch, 2)
-        tts_text_input, tr_input = text_tee
-        print("tts_text_input : ", tts_text_input)
-
+        if self._use_zero_latency_streaming:
+            tr_ch = utils.aio.Chan[str]()
+            tts_text_input = self._create_zero_latency_broadcast(llm_gen_data.text_ch, tr_ch)
+            tr_input = tr_ch
+        else:
+            # Fallback to original tee-based approach
+            text_tee = utils.aio.itertools.tee(llm_gen_data.text_ch, 2)
+            tts_text_input, tr_input = text_tee
+            logger.debug(f"tts_text_input (_pipeline_reply_task): {tts_text_input}")
 
         tts_task: asyncio.Task[bool] | None = None
         tts_gen_data: _TTSGenerationData | None = None
@@ -2021,6 +2028,7 @@ class AgentActivity(RecognitionHooks):
                 tr_input = timed_texts
                 read_transcript_from_tts = True
 
+        # NOW handle authorization (TTS is already reading the stream)
         wait_for_scheduled = asyncio.ensure_future(speech_handle._wait_for_scheduled())
         await speech_handle.wait_if_not_interrupted([wait_for_scheduled])
 
@@ -2035,7 +2043,10 @@ class AgentActivity(RecognitionHooks):
         if speech_handle.interrupted:
             current_span.set_attribute(trace_types.ATTR_SPEECH_INTERRUPTED, True)
             await utils.aio.cancel_and_wait(*tasks, wait_for_scheduled)
-            await text_tee.aclose()
+            if self._use_zero_latency_streaming and tr_ch:
+                tr_ch.close()
+            elif text_tee:
+                await text_tee.aclose()
             return
 
         self._session._update_agent_state("thinking")
@@ -2051,7 +2062,10 @@ class AgentActivity(RecognitionHooks):
         if speech_handle.interrupted:
             current_span.set_attribute(trace_types.ATTR_SPEECH_INTERRUPTED, True)
             await utils.aio.cancel_and_wait(*tasks, *authorization_tasks)
-            await text_tee.aclose()
+            if self._use_zero_latency_streaming and tr_ch:
+                tr_ch.close()
+            elif text_tee:
+                await text_tee.aclose()
             return
 
         reply_started_at = time.time()
@@ -2069,7 +2083,7 @@ class AgentActivity(RecognitionHooks):
         text_out: _TextOutput | None = None
         text_forward_task: asyncio.Task | None = None
         if tr_node_result is not None:
-            print("llm_gen_data inside: ", llm_gen_data) # here netadat is None
+            logger.debug(f"llm_gen_data inside: {llm_gen_data}") # here netadat is None
             text_forward_task, text_out = perform_text_forwarding(
                 text_output=text_output,
                 source=tr_node_result,
@@ -2128,7 +2142,7 @@ class AgentActivity(RecognitionHooks):
                 created_at=reply_started_at,
                 metadata=llm_gen_data.metadata, #here it is populated
             )
-            print("generated_msg AKSHAY: ", generated_msg)
+            logger.debug(f"generated_msg: {generated_msg}")
 
             speech_handle._item_added([generated_msg])
 
@@ -2189,6 +2203,10 @@ class AgentActivity(RecognitionHooks):
         forwarded_text = text_out.text if text_out else ""
         if speech_handle.interrupted:
             await utils.aio.cancel_and_wait(*tasks)
+            if self._use_zero_latency_streaming and tr_ch:
+                tr_ch.close()
+            elif text_tee:
+                await text_tee.aclose()
 
             # if the audio playout was enabled, clear the buffer
             if audio_output is not None:
@@ -2252,7 +2270,10 @@ class AgentActivity(RecognitionHooks):
         elif self._session.agent_state == "speaking":
             self._session._update_agent_state("listening")
 
-        await text_tee.aclose()
+        if self._use_zero_latency_streaming and tr_ch:
+            tr_ch.close()
+        elif text_tee:
+            await text_tee.aclose()
 
         speech_handle._mark_generation_done()  # mark the playout done before waiting for the tool execution  # noqa: E501
 
