@@ -91,6 +91,7 @@ class AgentSessionOptions:
     ivr_detection: bool
     ignore_interrupt_list: list[str]
     tts_text_transforms: Sequence[TextTransforms] | None
+    use_zero_latency_streaming: bool
 
 
 Userdata_T = TypeVar("Userdata_T")
@@ -163,9 +164,8 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
         ivr_detection: bool = False,
         conn_options: NotGivenOr[SessionConnectOptions] = NOT_GIVEN,
         loop: asyncio.AbstractEventLoop | None = None,
-        # deprecated
-        agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
         ignore_interrupt_list: list[str] = [],
+        use_zero_latency_streaming: bool = True,
         # deprecated
         agent_false_interruption_timeout: NotGivenOr[float | None] = NOT_GIVEN,
     ) -> None:
@@ -258,6 +258,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             loop (asyncio.AbstractEventLoop, optional): Event loop to bind the
                 session to. Falls back to :pyfunc:`asyncio.get_event_loop()`.
             ignore_interrupt_list (list[str]): List of words to ignore as interruptions.
+            use_zero_latency_streaming (bool): Whether to use zero-latency streaming.
         """
         super().__init__()
         self._loop = loop or asyncio.get_event_loop()
@@ -298,6 +299,7 @@ class AgentSession(rtc.EventEmitter[EventTypes], Generic[Userdata_T]):
             if is_given(use_tts_aligned_transcript)
             else None,
             ignore_interrupt_list=ignore_interrupt_list,
+            use_zero_latency_streaming=use_zero_latency_streaming,
         )
         self._conn_options = conn_options or SessionConnectOptions()
         self._started = False
