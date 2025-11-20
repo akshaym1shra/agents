@@ -157,7 +157,7 @@ async def _llm_inference_task(
 
                 if chunk.metadata:
                     data.metadata = chunk.metadata
-                    print(f"_llm_inference_task METADATA: {chunk.metadata}")
+                    logger.debug(f"_llm_inference_task METADATA: {chunk.metadata}")
                     # set node_name as soon as it appears
                     if not data.node_name_fut.done():
                         try:
@@ -190,7 +190,7 @@ async def _llm_inference_task(
 
                 if chunk.delta.content:
                     data.generated_text += chunk.delta.content
-                    print(f"_llm_inference_task ID: {chunk.id}")
+                    logger.debug(f"_llm_inference_task ID: {chunk.id}")
                     text_ch.send_nowait(chunk.delta.content)
 
             elif isinstance(chunk, FlushSentinel):
@@ -403,7 +403,7 @@ async def _text_forwarding_task(
                             node_name = node_name_future.result()
                         except Exception:
                             node_name = None
-                print("text_output node_name: ", node_name)
+                logger.debug(f"text_output node_name: {node_name}")
                 # Set current node on synchronizer if used
                 try:
                     from .transcription.synchronizer import TranscriptSynchronizer
