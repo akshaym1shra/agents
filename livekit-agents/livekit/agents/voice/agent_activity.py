@@ -87,8 +87,8 @@ _AgentActivityContextVar = contextvars.ContextVar["AgentActivity"]("agents_activ
 _SpeechHandleContextVar = contextvars.ContextVar["SpeechHandle"]("agents_speech_handle")
 
 # Pre-compile regex pattern for better performance
-# Hindi ([\u0900-\u0963\u0965-\u097F]+ except '।') + English/Spanish ([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+)
-WORD_PATTERN = re.compile(r'[\u0900-\u0963\u0965-\u097F]+|[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+')
+# Hindi ([\u0900-\u0963\u0965-\u097F]+ except '।') + English/Spanish ([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+) + Arabic ([\u0600-\u06FF\u0750-\u077F]+)
+WORD_PATTERN = re.compile(r'[\u0900-\u0963\u0965-\u097F]+|[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+|[\u0600-\u06FF\u0750-\u077F]+')
 
 @dataclass
 class _OnEnterData:
