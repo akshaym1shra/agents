@@ -1517,12 +1517,19 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
             and not self._current_speech.interrupted
             and self._session.options.min_interruption_words > 0
-            and len(split_words(info.new_transcript, split_character=True))
-            < self._session.options.min_interruption_words
         ):
-            self._cancel_preemptive_generation()
-            # avoid interruption if the new_transcript is too short
-            return False
+            raw_words = split_words(info.new_transcript, split_character=True)
+            if len(raw_words) < self._session.options.min_interruption_words:
+                self._cancel_preemptive_generation()
+                # avoid interruption if the new_transcript is too short
+                return False
+
+            # also check after stopword filtering
+            filtered = self.remove_stopwords(info.new_transcript)
+            if filtered is not None and len(filtered) < self._session.options.min_interruption_words:
+                self._cancel_preemptive_generation()
+                logger.info(f"on_end_of_turn: stopword-filtered transcript too short, skipping interruption. filtered={filtered}")
+                return False
 
         old_task = self._user_turn_completed_atask
         self._user_turn_completed_atask = self._create_speech_task(

@@ -333,6 +333,19 @@ class SpeechStream(stt.SpeechStream):
             duration=5.0,
         )
 
+        # Auto-commit fallback: promotes partial_transcript to FINAL when
+        # server-side VAD fails to commit (common with short utterances)
+        self._auto_commit_handle: asyncio.TimerHandle | None = None
+        self._last_partial_speech_data: stt.SpeechData | None = None
+        self._auto_committed = False
+
+        # Compute auto-commit timeout from server_vad params
+        if is_given(opts.server_vad) and opts.server_vad:
+            min_silence_ms = opts.server_vad.get("min_silence_duration_ms", 2500)
+            self._auto_commit_timeout = min_silence_ms / 1000 + 1.0
+        else:
+            self._auto_commit_timeout = 2.0
+
     def update_options(
         self,
         *,
@@ -466,8 +479,41 @@ class SpeechStream(stt.SpeechStream):
                     tasks_group.cancel()
                     tasks_group.exception()  # Retrieve exception to prevent it from being logged
             finally:
+                self._cancel_auto_commit()
                 if ws is not None:
                     await ws.close()
+
+    def _cancel_auto_commit(self) -> None:
+        """Cancel any pending auto-commit timer."""
+        if self._auto_commit_handle is not None:
+            self._auto_commit_handle.cancel()
+            self._auto_commit_handle = None
+
+    def _auto_commit_partial(self) -> None:
+        """Promote the last partial transcript to FINAL when server VAD fails to commit.
+
+        This is a safety net for short utterances (e.g., "yes", "ok", filler words)
+        that ElevenLabs server-side VAD doesn't reliably commit.
+        """
+        self._auto_commit_handle = None
+        if self._last_partial_speech_data and self._last_partial_speech_data.text:
+            logger.info(
+                "Auto-committing partial transcript (server VAD did not commit): %s",
+                self._last_partial_speech_data.text,
+            )
+            self._event_ch.send_nowait(
+                stt.SpeechEvent(
+                    type=SpeechEventType.FINAL_TRANSCRIPT,
+                    alternatives=[self._last_partial_speech_data],
+                )
+            )
+            if self._speaking:
+                self._event_ch.send_nowait(
+                    stt.SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
+                )
+                self._speaking = False
+            self._last_partial_speech_data = None
+            self._auto_committed = True
 
     async def _connect_ws(self) -> aiohttp.ClientWebSocketResponse:
         """Establish WebSocket connection to ElevenLabs Scribe v2 API"""
@@ -565,10 +611,38 @@ class SpeechStream(stt.SpeechStream):
                 )
                 self._event_ch.send_nowait(interim_event)
 
+                # Start/reset auto-commit fallback timer.
+                # If the server-side VAD never sends a committed_transcript
+                # (common for short utterances), this will promote the
+                # partial to FINAL after a timeout.
+                self._cancel_auto_commit()
+                self._last_partial_speech_data = speech_data
+                self._auto_committed = False
+                loop = asyncio.get_running_loop()
+                self._auto_commit_handle = loop.call_later(
+                    self._auto_commit_timeout,
+                    self._auto_commit_partial,
+                )
+
         # 11labs sends both when include_timestamps is True
         elif (
             message_type == "committed_transcript" and not self._opts.include_timestamps
         ) or message_type == "committed_transcript_with_timestamps":
+            # Cancel auto-commit timer since the real commit arrived
+            self._cancel_auto_commit()
+
+            # If we already auto-committed this partial, skip the duplicate
+            if self._auto_committed:
+                self._auto_committed = False
+                self._last_partial_speech_data = None
+                # Still handle empty commit for END_OF_SPEECH
+                if not text and self._speaking:
+                    self._event_ch.send_nowait(
+                        stt.SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
+                    )
+                    self._speaking = False
+                return
+
             # Final committed transcripts - these are sent to the LLM/TTS layer in LiveKit agents
             # and trigger agent responses (unlike partial transcripts which are UI-only)
             if text:
@@ -586,12 +660,14 @@ class SpeechStream(stt.SpeechStream):
                     alternatives=[speech_data],
                 )
                 self._event_ch.send_nowait(final_event)
+                self._last_partial_speech_data = None
             else:
                 # Empty commit signals end of speech segment (similar to Cartesia's is_final flag)
                 # This groups multiple committed transcripts into one speech segment
                 if self._speaking:
                     self._event_ch.send_nowait(stt.SpeechEvent(type=SpeechEventType.END_OF_SPEECH))
                     self._speaking = False
+                self._last_partial_speech_data = None
 
         elif message_type == "committed_transcript":
             # if timestamps are included, these will be ignored above since we are handling committed_transcript_with_timestamps
