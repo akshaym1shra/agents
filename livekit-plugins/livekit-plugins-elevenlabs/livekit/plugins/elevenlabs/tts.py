@@ -843,6 +843,8 @@ def _synthesize_url(opts: _TTSOptions) -> str:
     )
     if is_given(opts.streaming_latency):
         url += f"&optimize_streaming_latency={opts.streaming_latency}"
+    if is_given(opts.language):
+        url += f"&language_code={opts.language}"
     return url
 
 
