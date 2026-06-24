@@ -80,6 +80,7 @@ class ChatChunk(BaseModel):
     id: str
     delta: ChoiceDelta | None = None
     usage: CompletionUsage | None = None
+    metadata: dict | None = None
 
 
 class LLMError(BaseModel):

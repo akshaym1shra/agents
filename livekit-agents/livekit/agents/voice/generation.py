@@ -53,6 +53,8 @@ class _LLMGenerationData:
     id: str = field(default_factory=lambda: utils.shortuuid("item_"))
     started_fut: asyncio.Future[None] = field(default_factory=asyncio.Future)
     ttft: float | None = None
+    metadata: dict | None = None
+    node_name_fut: asyncio.Future[str | None] = field(default_factory=asyncio.Future)
 
 
 def perform_llm_inference(
@@ -155,6 +157,15 @@ async def _llm_inference_task(
                 if not chunk.delta:
                     continue
 
+                if chunk.metadata:
+                    data.metadata = chunk.metadata
+                    # set node_name as soon as it appears
+                    if not data.node_name_fut.done():
+                        try:
+                            data.node_name_fut.set_result(chunk.metadata.get("node"))
+                        except Exception:
+                            pass
+
                 if chunk.delta.tool_calls:
                     for tool in chunk.delta.tool_calls:
                         if tool.type != "function":
@@ -204,6 +215,15 @@ async def _llm_inference_task(
     )
     if data.ttft is not None:
         current_span.set_attribute(trace_types.ATTR_RESPONSE_TTFT, data.ttft)
+    # resolve node_name if never set
+    if not data.node_name_fut.done():
+        try:
+            data.node_name_fut.set_result(data.metadata.get("node") if data.metadata else None)
+        except Exception:
+            try:
+                data.node_name_fut.set_result(None)
+            except Exception:
+                pass
     return True
 
 
@@ -310,10 +330,20 @@ class _TextOutput:
 
 
 def perform_text_forwarding(
-    *, text_output: io.TextOutput | None, source: AsyncIterable[str]
+    *,
+    text_output: io.TextOutput | None,
+    source: AsyncIterable[str],
+    node_name_future: asyncio.Future[str | None] | None = None,
 ) -> tuple[asyncio.Task[None], _TextOutput]:
     out = _TextOutput(text="", first_text_fut=asyncio.Future())
-    task = asyncio.create_task(_text_forwarding_task(text_output, source, out))
+    task = asyncio.create_task(
+        _text_forwarding_task(
+            text_output,
+            source,
+            out,
+            node_name_future=node_name_future,
+        )
+    )
     return task, out
 
 
@@ -322,12 +352,35 @@ async def _text_forwarding_task(
     text_output: io.TextOutput | None,
     source: AsyncIterable[str],
     out: _TextOutput,
+    node_name_future: asyncio.Future[str | None] | None = None,
 ) -> None:
     try:
         async for delta in source:
             out.text += delta
             if text_output is not None:
-                await text_output.capture_text(delta)
+                # Best effort: tag the segment with the node name once it is known.
+                # Must stay non-blocking so text stays in sync with audio playout.
+                node_name: str | None = None
+                if node_name_future is not None and node_name_future.done():
+                    try:
+                        node_name = node_name_future.result()
+                    except Exception:
+                        node_name = None
+                # Set current node on synchronizer if used
+                try:
+                    from .transcription.synchronizer import TranscriptSynchronizer
+
+                    if isinstance(
+                        getattr(text_output, "_synchronizer", None), TranscriptSynchronizer
+                    ):
+                        await text_output._synchronizer._set_current_node_name(node_name)
+                except Exception:
+                    pass
+
+                try:
+                    await text_output.capture_text(delta, node_name=node_name)
+                except TypeError:
+                    await text_output.capture_text(delta)
 
             if not out.first_text_fut.done():
                 out.first_text_fut.set_result(None)
@@ -449,6 +502,7 @@ async def forward_generation(
     audio_source: AsyncIterable[rtc.AudioFrame] | None,
     text_source: AsyncIterable[str] | None,
     on_first_frame: Callable[[asyncio.Future[Any], _AudioOutput | None], None],
+    node_name_future: asyncio.Future[str | None] | None = None,
 ) -> _ForwardOutput:
     """Forward one segment's audio/text to the outputs, then wait for its playout.
 
@@ -472,7 +526,7 @@ async def forward_generation(
         text_out: _TextOutput | None = None
         if text_source is not None:
             forward_text_task, text_out = perform_text_forwarding(
-                text_output=text_output, source=text_source
+                text_output=text_output, source=text_source, node_name_future=node_name_future
             )
             forward_tasks.append(forward_text_task)
             out.text_out = text_out

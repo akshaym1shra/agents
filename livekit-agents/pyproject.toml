@@ -135,7 +135,7 @@ did = ["livekit-plugins-did>=1.6.3"]
 [project.urls]
 Documentation = "https://docs.livekit.io"
 Website = "https://livekit.io/"
-Source = "https://github.com/livekit/agents"
+Source = "https://github.com/akshaym1shra/agents"
 
 [tool.hatch.version]
 path = "livekit/agents/version.py"

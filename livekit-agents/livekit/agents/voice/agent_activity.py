@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 import heapq
 import json
+import re
 import time
 from collections.abc import AsyncIterable, Coroutine, Sequence
 from dataclasses import dataclass
@@ -105,6 +106,13 @@ class ActivityClosedError(Exception):
     """Raised by ``wait_for_idle`` when the target activity/session has closed."""
 
 
+# Pre-compile regex pattern for better performance
+# Hindi ([\u0900-\u0963\u0965-\u097F]+ except '।') + English/Spanish ([a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+) + Arabic ([\u0600-\u06FF\u0750-\u077F]+)
+WORD_PATTERN = re.compile(
+    r"[\u0900-\u0963\u0965-\u097F]+|[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]+|[\u0600-\u06FF\u0750-\u077F]+"
+)
+
+
 @dataclass
 class _OnEnterData:
     session: AgentSession
@@ -166,6 +174,9 @@ class AgentActivity(RecognitionHooks):
         self._audio_recognition: AudioRecognition | None = None
         self._lock = asyncio.Lock()
         self._tool_choice: llm.ToolChoice | None = None
+        # Feature: Ignore Interrupt List
+        # Filters out stopwords from transcripts when checking interruptions
+        self._ignore_interrupt_list = None
 
         self._started = False
         self._closed = False
@@ -253,6 +264,7 @@ class AgentActivity(RecognitionHooks):
 
         # speeches that audio playout finished but not done because of tool calls
         self._background_speeches: set[SpeechHandle] = set()
+        self._ignore_interrupt_list = frozenset(self._session._opts.ignore_interrupt_list)
 
         # placeholder used to hold a RunResult open while waiting for a realtime
         # model to auto-generate a tool reply (auto_tool_reply_generation=True).
@@ -448,6 +460,24 @@ class AgentActivity(RecognitionHooks):
         )
 
         return use_aligned_transcript is True
+
+    def remove_stopwords(self, text: str) -> list[str] | None:
+        """
+        Efficiently remove stopwords from text.
+        Uses pre-compiled regex and frozenset for O(1) lookups.
+
+        Args:
+            text: Input text string
+
+        Returns:
+            List of non-stopword words
+        """
+        trimmed_words = None
+        if text and self._ignore_interrupt_list:
+            words = WORD_PATTERN.findall(text)
+            trimmed_words = [word for word in words if word not in self._ignore_interrupt_list]
+            return trimmed_words
+        return trimmed_words
 
     async def update_instructions(self, instructions: str) -> None:
         self._agent._instructions = instructions
@@ -1811,6 +1841,10 @@ class AgentActivity(RecognitionHooks):
             if len(split_words(text, split_character=True)) < interruption_options["min_words"]:
                 return
 
+            filtered = self.remove_stopwords(text)
+            if filtered is not None and len(filtered) < interruption_options["min_words"]:
+                return
+
         if self._rt_session is not None:
             self._rt_session.start_user_activity()
 
@@ -2116,12 +2150,25 @@ class AgentActivity(RecognitionHooks):
             and self._current_speech.allow_interruptions
             and not self._current_speech.interrupted
             and self._session.options.interruption["min_words"] > 0
-            and len(split_words(info.new_transcript, split_character=True))
-            < self._session.options.interruption["min_words"]
         ):
-            self._cancel_preemptive_generation()
-            # avoid interruption if the new_transcript is too short
-            return False
+            raw_words = split_words(info.new_transcript, split_character=True)
+            if len(raw_words) < self._session.options.interruption["min_words"]:
+                self._cancel_preemptive_generation()
+                # avoid interruption if the new_transcript is too short
+                return False
+
+            # also check after stopword filtering
+            filtered = self.remove_stopwords(info.new_transcript)
+            if (
+                filtered is not None
+                and len(filtered) < self._session.options.interruption["min_words"]
+            ):
+                self._cancel_preemptive_generation()
+                logger.debug(
+                    "on_end_of_turn: stopword-filtered transcript too short, "
+                    f"skipping interruption. filtered={filtered}"
+                )
+                return False
 
         old_task = self._user_turn_completed_atask
         self._user_turn_completed_atask = self._create_speech_task(
@@ -2798,6 +2845,7 @@ class AgentActivity(RecognitionHooks):
             )
             tasks.append(synthesize_task)
 
+        # NOW handle authorization (TTS is already reading the stream)
         wait_for_scheduled = asyncio.ensure_future(speech_handle._wait_for_scheduled())
         await speech_handle.wait_if_not_interrupted([wait_for_scheduled])
 
@@ -2965,6 +3013,7 @@ class AgentActivity(RecognitionHooks):
                 audio_source=audio_source,
                 text_source=text_source,
                 on_first_frame=_on_first_frame,
+                node_name_future=llm_gen_data.node_name_fut,
             )
             segment_outputs.append(out)
             if speech_handle.interrupted:
@@ -3032,6 +3081,7 @@ class AgentActivity(RecognitionHooks):
                 interrupted=speech_handle.interrupted,
                 created_at=reply_started_at,
                 metrics=assistant_metrics,
+                metadata=llm_gen_data.metadata,
                 **extra_kwargs,
             )
             self._agent._chat_ctx.insert(msg)
